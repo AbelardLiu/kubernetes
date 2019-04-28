@@ -18,7 +18,9 @@ package storage
 
 import (
 	"context"
+	"fmt"
 
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -84,8 +86,6 @@ type TriggerPublisherFunc func(obj runtime.Object) []MatchValue
 var Everything = SelectionPredicate{
 	Label: labels.Everything(),
 	Field: fields.Everything(),
-	// TODO: split this into a new top level constant?
-	IncludeUninitialized: true,
 }
 
 // Pass an UpdateFunc to Interface.GuaranteedUpdate to make an update
@@ -98,12 +98,44 @@ type Preconditions struct {
 	// Specifies the target UID.
 	// +optional
 	UID *types.UID `json:"uid,omitempty"`
+	// Specifies the target ResourceVersion
+	// +optional
+	ResourceVersion *string `json:"resourceVersion,omitempty"`
 }
 
 // NewUIDPreconditions returns a Preconditions with UID set.
 func NewUIDPreconditions(uid string) *Preconditions {
 	u := types.UID(uid)
 	return &Preconditions{UID: &u}
+}
+
+func (p *Preconditions) Check(key string, obj runtime.Object) error {
+	if p == nil {
+		return nil
+	}
+	objMeta, err := meta.Accessor(obj)
+	if err != nil {
+		return NewInternalErrorf(
+			"can't enforce preconditions %v on un-introspectable object %v, got error: %v",
+			*p,
+			obj,
+			err)
+	}
+	if p.UID != nil && *p.UID != objMeta.GetUID() {
+		err := fmt.Sprintf(
+			"Precondition failed: UID in precondition: %v, UID in object meta: %v",
+			*p.UID,
+			objMeta.GetUID())
+		return NewInvalidObjError(key, err)
+	}
+	if p.ResourceVersion != nil && *p.ResourceVersion != objMeta.GetResourceVersion() {
+		err := fmt.Sprintf(
+			"Precondition failed: ResourceVersion in precondition: %v, ResourceVersion in object meta: %v",
+			*p.ResourceVersion,
+			objMeta.GetResourceVersion())
+		return NewInvalidObjError(key, err)
+	}
+	return nil
 }
 
 // Interface offers a common interface for object marshaling/unmarshaling operations and
@@ -187,8 +219,8 @@ type Interface interface {
 	//       // Return the modified object - return an error to stop iterating. Return
 	//       // a uint64 to alter the TTL on the object, or nil to keep it the same value.
 	//       return cur, nil, nil
-	//    }
-	// })
+	//    },
+	// )
 	GuaranteedUpdate(
 		ctx context.Context, key string, ptrToType runtime.Object, ignoreNotFound bool,
 		precondtions *Preconditions, tryUpdate UpdateFunc, suggestion ...runtime.Object) error

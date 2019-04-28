@@ -17,10 +17,11 @@ limitations under the License.
 package framework
 
 import (
+	"context"
 	"fmt"
 	"time"
 
-	. "github.com/onsi/ginkgo"
+	"github.com/onsi/ginkgo"
 
 	apps "k8s.io/api/apps/v1"
 	"k8s.io/api/core/v1"
@@ -29,17 +30,13 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
 	clientset "k8s.io/client-go/kubernetes"
-	scaleclient "k8s.io/client-go/scale"
-	appsinternal "k8s.io/kubernetes/pkg/apis/apps"
+	watchtools "k8s.io/client-go/tools/watch"
 	deploymentutil "k8s.io/kubernetes/pkg/controller/deployment/util"
 	testutils "k8s.io/kubernetes/test/utils"
+	imageutils "k8s.io/kubernetes/test/utils/image"
 )
 
-func UpdateDeploymentWithRetries(c clientset.Interface, namespace, name string, applyUpdate testutils.UpdateDeploymentFunc) (*apps.Deployment, error) {
-	return testutils.UpdateDeploymentWithRetries(c, namespace, name, applyUpdate, Logf, Poll, pollShortTimeout)
-}
-
-// Waits for the deployment to clean up old rcs.
+// WaitForDeploymentOldRSsNum waits for the deployment to clean up old rcs.
 func WaitForDeploymentOldRSsNum(c clientset.Interface, ns, deploymentName string, desiredRSNum int) error {
 	var oldRSs []*apps.ReplicaSet
 	var d *apps.Deployment
@@ -68,21 +65,24 @@ func logReplicaSetsOfDeployment(deployment *apps.Deployment, allOldRSs []*apps.R
 	testutils.LogReplicaSetsOfDeployment(deployment, allOldRSs, newRS, Logf)
 }
 
+// WaitForObservedDeployment waits for the specified deployment generation.
 func WaitForObservedDeployment(c clientset.Interface, ns, deploymentName string, desiredGeneration int64) error {
 	return testutils.WaitForObservedDeployment(c, ns, deploymentName, desiredGeneration)
 }
 
+// WaitForDeploymentWithCondition waits for the specified deployment condition.
 func WaitForDeploymentWithCondition(c clientset.Interface, ns, deploymentName, reason string, condType apps.DeploymentConditionType) error {
-	return testutils.WaitForDeploymentWithCondition(c, ns, deploymentName, reason, condType, Logf, Poll, pollLongTimeout)
+	return testutils.WaitForDeploymentWithCondition(c, ns, deploymentName, reason, condType, Logf, Poll, PollLongTimeout)
 }
 
 // WaitForDeploymentRevisionAndImage waits for the deployment's and its new RS's revision and container image to match the given revision and image.
 // Note that deployment revision and its new RS revision should be updated shortly most of the time, but an overwhelmed RS controller
 // may result in taking longer to relabel a RS.
 func WaitForDeploymentRevisionAndImage(c clientset.Interface, ns, deploymentName string, revision, image string) error {
-	return testutils.WaitForDeploymentRevisionAndImage(c, ns, deploymentName, revision, image, Logf, Poll, pollLongTimeout)
+	return testutils.WaitForDeploymentRevisionAndImage(c, ns, deploymentName, revision, image, Logf, Poll, PollLongTimeout)
 }
 
+// NewDeployment returns a deployment spec with the specified argument.
 func NewDeployment(deploymentName string, replicas int32, podLabels map[string]string, imageName, image string, strategyType apps.DeploymentStrategyType) *apps.Deployment {
 	zero := int64(0)
 	return &apps.Deployment{
@@ -114,28 +114,28 @@ func NewDeployment(deploymentName string, replicas int32, podLabels map[string]s
 	}
 }
 
-// Waits for the deployment to complete, and don't check if rolling update strategy is broken.
+// WaitForDeploymentComplete waits for the deployment to complete, and don't check if rolling update strategy is broken.
 // Rolling update strategy is used only during a rolling update, and can be violated in other situations,
 // such as shortly after a scaling event or the deployment is just created.
 func WaitForDeploymentComplete(c clientset.Interface, d *apps.Deployment) error {
-	return testutils.WaitForDeploymentComplete(c, d, Logf, Poll, pollLongTimeout)
+	return testutils.WaitForDeploymentComplete(c, d, Logf, Poll, PollLongTimeout)
 }
 
-// Waits for the deployment to complete, and check rolling update strategy isn't broken at any times.
+// WaitForDeploymentCompleteAndCheckRolling waits for the deployment to complete, and check rolling update strategy isn't broken at any times.
 // Rolling update strategy should not be broken during a rolling update.
 func WaitForDeploymentCompleteAndCheckRolling(c clientset.Interface, d *apps.Deployment) error {
-	return testutils.WaitForDeploymentCompleteAndCheckRolling(c, d, Logf, Poll, pollLongTimeout)
+	return testutils.WaitForDeploymentCompleteAndCheckRolling(c, d, Logf, Poll, PollLongTimeout)
 }
 
 // WaitForDeploymentUpdatedReplicasGTE waits for given deployment to be observed by the controller and has at least a number of updatedReplicas
 func WaitForDeploymentUpdatedReplicasGTE(c clientset.Interface, ns, deploymentName string, minUpdatedReplicas int32, desiredGeneration int64) error {
-	return testutils.WaitForDeploymentUpdatedReplicasGTE(c, ns, deploymentName, minUpdatedReplicas, desiredGeneration, Poll, pollLongTimeout)
+	return testutils.WaitForDeploymentUpdatedReplicasGTE(c, ns, deploymentName, minUpdatedReplicas, desiredGeneration, Poll, PollLongTimeout)
 }
 
 // WaitForDeploymentRollbackCleared waits for given deployment either started rolling back or doesn't need to rollback.
 // Note that rollback should be cleared shortly, so we only wait for 1 minute here to fail early.
 func WaitForDeploymentRollbackCleared(c clientset.Interface, ns, deploymentName string) error {
-	return testutils.WaitForDeploymentRollbackCleared(c, ns, deploymentName, Poll, pollShortTimeout)
+	return testutils.WaitForDeploymentRollbackCleared(c, ns, deploymentName, Poll, PollShortTimeout)
 }
 
 // WatchRecreateDeployment watches Recreate deployments and ensures no new pods will run at the same time with
@@ -172,19 +172,18 @@ func WatchRecreateDeployment(c clientset.Interface, d *apps.Deployment) error {
 			d.Generation <= d.Status.ObservedGeneration, nil
 	}
 
-	_, err = watch.Until(2*time.Minute, w, condition)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	_, err = watchtools.UntilWithoutRetry(ctx, w, condition)
 	if err == wait.ErrWaitTimeout {
 		err = fmt.Errorf("deployment %q never completed: %#v", d.Name, status)
 	}
 	return err
 }
 
-func ScaleDeployment(clientset clientset.Interface, scalesGetter scaleclient.ScalesGetter, ns, name string, size uint, wait bool) error {
-	return ScaleResource(clientset, scalesGetter, ns, name, size, wait, appsinternal.Kind("Deployment"), appsinternal.Resource("deployments"))
-}
-
+// RunDeployment runs a delopyment with the specified config.
 func RunDeployment(config testutils.DeploymentConfig) error {
-	By(fmt.Sprintf("creating deployment %s in namespace %s", config.Name, config.Namespace))
+	ginkgo.By(fmt.Sprintf("creating deployment %s in namespace %s", config.Name, config.Namespace))
 	config.NodeDumpFunc = DumpNodeDebugInfo
 	config.ContainerDumpFunc = LogFailedContainers
 	return testutils.RunDeployment(config)
@@ -194,8 +193,9 @@ func logPodsOfDeployment(c clientset.Interface, deployment *apps.Deployment, rsL
 	testutils.LogPodsOfDeployment(c, deployment, rsList, Logf)
 }
 
+// WaitForDeploymentRevision waits for becoming the target revision of a delopyment.
 func WaitForDeploymentRevision(c clientset.Interface, d *apps.Deployment, targetRevision string) error {
-	err := wait.PollImmediate(Poll, pollLongTimeout, func() (bool, error) {
+	err := wait.PollImmediate(Poll, PollLongTimeout, func() (bool, error) {
 		deployment, err := c.AppsV1().Deployments(d.Namespace).Get(d.Name, metav1.GetOptions{})
 		if err != nil {
 			return false, err
@@ -214,6 +214,7 @@ func CheckDeploymentRevisionAndImage(c clientset.Interface, ns, deploymentName, 
 	return testutils.CheckDeploymentRevisionAndImage(c, ns, deploymentName, revision, image)
 }
 
+// CreateDeployment creates a deployment.
 func CreateDeployment(client clientset.Interface, replicas int32, podLabels map[string]string, nodeSelector map[string]string, namespace string, pvclaims []*v1.PersistentVolumeClaim, command string) (*apps.Deployment, error) {
 	deploymentSpec := MakeDeployment(replicas, podLabels, nodeSelector, namespace, pvclaims, false, command)
 	deployment, err := client.AppsV1().Deployments(namespace).Create(deploymentSpec)
@@ -255,7 +256,7 @@ func MakeDeployment(replicas int32, podLabels map[string]string, nodeSelector ma
 					Containers: []v1.Container{
 						{
 							Name:    "write-pod",
-							Image:   "busybox",
+							Image:   imageutils.GetE2EImage(imageutils.BusyBox),
 							Command: []string{"/bin/sh"},
 							Args:    []string{"-c", command},
 							SecurityContext: &v1.SecurityContext{

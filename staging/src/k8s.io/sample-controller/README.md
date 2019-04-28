@@ -19,7 +19,7 @@ The `update-codegen` script will automatically generate the following files &
 directories:
 
 * `pkg/apis/samplecontroller/v1alpha1/zz_generated.deepcopy.go`
-* `pkg/client/`
+* `pkg/generated/`
 
 Changes should not be made to these files manually, and when creating your own
 controller based off of this implementation you should not copy these files and
@@ -42,17 +42,19 @@ This is an example of how to build a kube-like controller with a single type.
 
 ```sh
 # assumes you have a working kubeconfig, not required if operating in-cluster
-$ go build -o sample-controller .
-$ ./sample-controller -kubeconfig=$HOME/.kube/config
+go get k8s.io/sample-controller
+cd $GOPATH/src/k8s.io/sample-controller
+go build -o sample-controller .
+./sample-controller -kubeconfig=$HOME/.kube/config
 
 # create a CustomResourceDefinition
-$ kubectl create -f artifacts/examples/crd.yaml
+kubectl create -f artifacts/examples/crd.yaml
 
 # create a custom resource of type Foo
-$ kubectl create -f artifacts/examples/example-foo.yaml
+kubectl create -f artifacts/examples/example-foo.yaml
 
 # check deployments created through the custom resource
-$ kubectl get deployments
+kubectl get deployments
 ```
 
 ## Use Cases
@@ -100,14 +102,13 @@ In the above steps, use `crd-validation.yaml` to create the CRD:
 
 ```sh
 # create a CustomResourceDefinition supporting validation
-$ kubectl create -f artifacts/examples/crd-validation.yaml
+kubectl create -f artifacts/examples/crd-validation.yaml
 ```
 
 ## Subresources
 
-Custom Resources support `/status` and `/scale` subresources as an
-[alpha feature](https://kubernetes.io/docs/tasks/access-kubernetes-api/extend-api-custom-resource-definitions/#subresources) in v1.10.
-Enable this feature using the `CustomResourceSubresources` feature gate on the [kube-apiserver](https://kubernetes.io/docs/admin/kube-apiserver):
+Custom Resources support `/status` and `/scale` subresources as a [beta feature](https://kubernetes.io/docs/tasks/access-kubernetes-api/custom-resources/custom-resource-definitions/#subresources) in v1.11 and is enabled by default.
+This feature is [alpha](https://v1-10.docs.kubernetes.io/docs/tasks/access-kubernetes-api/extend-api-custom-resource-definitions/#subresources) in v1.10 and to enable it you need to set the `CustomResourceSubresources` feature gate on the [kube-apiserver](https://kubernetes.io/docs/admin/kube-apiserver):
 
 ```sh
 --feature-gates=CustomResourceSubresources=true
@@ -125,14 +126,14 @@ In the above steps, use `crd-status-subresource.yaml` to create the CRD:
 
 ```sh
 # create a CustomResourceDefinition supporting the status subresource
-$ kubectl create -f artifacts/examples/crd-status-subresource.yaml
+kubectl create -f artifacts/examples/crd-status-subresource.yaml
 ```
 
 ## Cleanup
 
 You can clean up the created CustomResourceDefinition with:
 
-    $ kubectl delete crd foos.samplecontroller.k8s.io
+    kubectl delete crd foos.samplecontroller.k8s.io
 
 ## Compatibility
 

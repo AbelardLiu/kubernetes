@@ -27,9 +27,15 @@ import (
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/test/e2e/framework"
 	"k8s.io/kubernetes/test/e2e/storage/utils"
+	imageutils "k8s.io/kubernetes/test/utils/image"
 
 	. "github.com/onsi/ginkgo"
-	. "github.com/onsi/gomega"
+)
+
+var (
+	volumePath = "/test-volume"
+	volumeName = "test-volume"
+	mountImage = imageutils.GetE2EImage(imageutils.Mounttest)
 )
 
 var _ = utils.SIGDescribe("Ephemeralstorage", func() {
@@ -48,7 +54,7 @@ var _ = utils.SIGDescribe("Ephemeralstorage", func() {
 			It(fmt.Sprintf("should allow deletion of pod with invalid volume : %s", testSource.volumeType), func() {
 				pod := testEphemeralVolumePod(f, testSource.volumeType, testSource.source)
 				pod, err := c.CoreV1().Pods(f.Namespace.Name).Create(pod)
-				Expect(err).NotTo(HaveOccurred())
+				framework.ExpectNoError(err)
 
 				// Allow it to sleep for 30 seconds
 				time.Sleep(30 * time.Second)

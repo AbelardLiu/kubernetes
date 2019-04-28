@@ -20,12 +20,13 @@ import (
 	"os"
 	"time"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	extensionsinternal "k8s.io/kubernetes/pkg/apis/extensions"
 	"k8s.io/kubernetes/test/e2e/framework"
+	"k8s.io/kubernetes/test/e2e/framework/gpu"
 	imageutils "k8s.io/kubernetes/test/utils/image"
 
 	. "github.com/onsi/ginkgo"
@@ -53,8 +54,17 @@ func makeCudaAdditionDevicePluginTestPod() *v1.Pod {
 			RestartPolicy: v1.RestartPolicyNever,
 			Containers: []v1.Container{
 				{
-					Name:  "vector-addition",
+					Name:  "vector-addition-cuda8",
 					Image: imageutils.GetE2EImage(imageutils.CudaVectorAdd),
+					Resources: v1.ResourceRequirements{
+						Limits: v1.ResourceList{
+							gpuResourceName: *resource.NewQuantity(1, resource.DecimalSI),
+						},
+					},
+				},
+				{
+					Name:  "vector-addition-cuda10",
+					Image: imageutils.GetE2EImage(imageutils.CudaVectorAdd2),
 					Resources: v1.ResourceRequirements{
 						Limits: v1.ResourceList{
 							gpuResourceName: *resource.NewQuantity(1, resource.DecimalSI),
@@ -71,7 +81,7 @@ func logOSImages(f *framework.Framework) {
 	nodeList, err := f.ClientSet.CoreV1().Nodes().List(metav1.ListOptions{})
 	framework.ExpectNoError(err, "getting node list")
 	for _, node := range nodeList.Items {
-		framework.Logf("OS Image: %v", node.Status.NodeInfo.OSImage)
+		framework.Logf("Nodename: %v, OS Image: %v", node.Name, node.Status.NodeInfo.OSImage)
 	}
 }
 
@@ -98,7 +108,7 @@ func getGPUsAvailable(f *framework.Framework) int64 {
 	framework.ExpectNoError(err, "getting node list")
 	var gpusAvailable int64
 	for _, node := range nodeList.Items {
-		if val, ok := node.Status.Capacity[gpuResourceName]; ok {
+		if val, ok := node.Status.Allocatable[gpuResourceName]; ok {
 			gpusAvailable += (&val).Value()
 		}
 	}
@@ -114,7 +124,7 @@ func SetupNVIDIAGPUNode(f *framework.Framework, setupResourceGatherer bool) *fra
 	} else {
 		dsYamlUrl = "https://raw.githubusercontent.com/GoogleCloudPlatform/container-engine-accelerators/master/daemonset.yaml"
 	}
-	gpuResourceName = framework.NVIDIAGPUResourceName
+	gpuResourceName = gpu.NVIDIAGPUResourceName
 
 	framework.Logf("Using %v", dsYamlUrl)
 	// Creates the DaemonSet that installs Nvidia Drivers.
@@ -137,7 +147,7 @@ func SetupNVIDIAGPUNode(f *framework.Framework, setupResourceGatherer bool) *fra
 	var rsgather *framework.ContainerResourceGatherer
 	if setupResourceGatherer {
 		framework.Logf("Starting ResourceUsageGather for the created DaemonSet pods.")
-		rsgather, err = framework.NewResourceUsageGatherer(f.ClientSet, framework.ResourceGathererOptions{InKubemark: false, MasterOnly: false, ResourceDataGatheringPeriod: 2 * time.Second, ProbeDuration: 2 * time.Second, PrintVerboseLogs: true}, pods)
+		rsgather, err = framework.NewResourceUsageGatherer(f.ClientSet, framework.ResourceGathererOptions{InKubemark: false, Nodes: framework.AllNodes, ResourceDataGatheringPeriod: 2 * time.Second, ProbeDuration: 2 * time.Second, PrintVerboseLogs: true}, pods)
 		framework.ExpectNoError(err, "creating ResourceUsageGather for the daemonset pods")
 		go rsgather.StartGatheringData()
 	}

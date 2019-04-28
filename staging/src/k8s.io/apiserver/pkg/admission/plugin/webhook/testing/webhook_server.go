@@ -66,6 +66,9 @@ func webhookHandler(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(&v1beta1.AdmissionReview{
 			Response: &v1beta1.AdmissionResponse{
 				Allowed: false,
+				Result: &metav1.Status{
+					Code: http.StatusForbidden,
+				},
 			},
 		})
 	case "/disallowReason":
@@ -75,6 +78,7 @@ func webhookHandler(w http.ResponseWriter, r *http.Request) {
 				Allowed: false,
 				Result: &metav1.Status{
 					Message: "you shall not pass",
+					Code:    http.StatusForbidden,
 				},
 			},
 		})
@@ -83,6 +87,9 @@ func webhookHandler(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(&v1beta1.AdmissionReview{
 			Response: &v1beta1.AdmissionResponse{
 				Allowed: true,
+				AuditAnnotations: map[string]string{
+					"key1": "value1",
+				},
 			},
 		})
 	case "/removeLabel":
@@ -93,6 +100,9 @@ func webhookHandler(w http.ResponseWriter, r *http.Request) {
 				Allowed:   true,
 				PatchType: &pt,
 				Patch:     []byte(`[{"op": "remove", "path": "/metadata/labels/remove"}]`),
+				AuditAnnotations: map[string]string{
+					"key1": "value1",
+				},
 			},
 		})
 	case "/addLabel":
@@ -118,6 +128,16 @@ func webhookHandler(w http.ResponseWriter, r *http.Request) {
 	case "/nilResponse":
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(&v1beta1.AdmissionReview{})
+	case "/invalidAnnotation":
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(&v1beta1.AdmissionReview{
+			Response: &v1beta1.AdmissionResponse{
+				Allowed: true,
+				AuditAnnotations: map[string]string{
+					"invalid*key": "value1",
+				},
+			},
+		})
 	default:
 		http.NotFound(w, r)
 	}
